@@ -1,0 +1,12 @@
+{
+    "filepath": "/project/gravwave/Data/TPASCAT/J1818-1422/1818.test",
+    "nchan": 8,
+    "DMr": [362, 364],
+    "Tau_sc": [-3,-1],
+    "Tau_idx": [-4,-2],
+    "incScatter": true,
+    "incScatter_index": true,
+    "Nshapelets": 1,
+    "have_EFAC": false,
+    "EFAC": [0.5, 10]
+  }
