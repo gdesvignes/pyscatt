@@ -64,13 +64,37 @@ function shapelet_model(Samp, nbin, nu, β, H, fact)
     end
     return pulse_model
 end
+
+function make_param_file(settings, paramnames)
+    fn = string(settings.base_dir,"/",settings.file_root,".paramnames")
+    open(fn, "w") do file
+        for p in paramnames
+            if p == "beta"
+                write(file, "width\t\\beta\n")
+            elseif p == "phi0"
+      	      	write(file, "phase\t\\phi\n")
+      	    elseif p == "DM"
+       	        write(file, "DM\tDM\n")
+      	    elseif p == "Tau"
+       	        write(file, "tau\t\\tau\n")
+      	    elseif p == "gamma"
+       	        write(file, "gamma\t\\gamma\n")
+      	    elseif p == "EFAC"
+       	        write(file, "EFAC\tEFAC\n")
+	    elseif p[1:4] == "samp"
+                write(file, p,"\t",p,"\n")
+            end
+        end
+    end
+
+end
     
 function load_data(filename, nchan, inc_τ, inc_α, inc_EFAC, Nsamp)
     ar = psrchive.Archive_load(filename)
     ar.tscrunch()
     ar.pscrunch()
     ar.fscrunch_to_nchan(nchan)
-    #ar.bscrunch(2)
+    ar.bscrunch(2)
     ar.remove_baseline()
     dm = ar.get_dispersion_measure()
     nbin = ar.get_nbin()
@@ -122,27 +146,27 @@ function prior(cube)
     
     ipar = 1
     pcube = zeros(length(cube))
-    pcube[ipar] = LogUniformPrior!(cube[ipar], 1e-3, 1e-1); ipar += 1 # Width of the shapelet model
+    pcube[ipar] = LogUniformPrior!(cube[ipar], 1e-3, 0.5); ipar += 1 # Width of the shapelet model
     pcube[ipar] = UniformPrior!(cube[ipar], 0, 1); ipar += 1 # Phase of the pulse at reffreq  
 
     # Shapelet amplitudes
     for i in 1:ar.Nsamp-1
-        pcube[ipar] = UniformPrior!(cube[ipar], -2, 2); ipar+= 1
+        pcube[ipar] = GaussianPrior!(cube[ipar], 0, 1); ipar+= 1
     end
 
     # include DM if more than one frequency channel in the model
     if ar.nchan > 1
-       pcube[ipar] = GaussianPrior!(cube[ipar], 2100, 50); ipar += 1
+       pcube[ipar] = GaussianPrior!(cube[ipar], ar.dm, 10); ipar += 1
     end
 
     # Scattering time scale at reffreq
     if ar.inc_τ
-        pcube[ipar] = UniformPrior!(cube[ipar],-2, 1.); ipar += 1
+        pcube[ipar] = UniformPrior!(cube[ipar],-5, 1.); ipar += 1
     end
     
     # Scattering index 
     if ar.nchan > 1 && ar.inc_τ && ar.inc_α
-        pcube[ipar] = GaussianPrior!(cube[ipar],-3.8, 0.2); ipar += 1
+        pcube[ipar] = GaussianPrior!(cube[ipar],-4.2, 0.4); ipar += 1
     end
 
     # EFAC
@@ -226,7 +250,7 @@ function likelihood(cube)
     fftmodel_freqs = 2*π * collect(0:nbin/ 2) / ( ar.period) # Could be moved outside of the likelihood
     twopif2 = 2*π * collect(0:nbin/2)
 
-    L = 0 #Likelihood value
+    L = 0.0  #Likelihood value
     dat = vec(ar.data)
     F = zeros(nchan*nbin , 2*nchan)
     
@@ -278,7 +302,7 @@ function likelihood(cube)
         detΣ = tr(log(abs.(Diagonal(R))))
         L = -0.5 * (detN + detΣ + transpose(dat) * Ni * dat - transpose(dh)*coeff)
     catch
-        L = -10^20
+        L = -10.0^20
     end
 
     return L, 0.
@@ -286,13 +310,13 @@ function likelihood(cube)
 end
 
 function main()
-    nchan = 8;
+    nchan = 16;
     inc_τ = true;
-    inc_α = false;
+    inc_α = true;
     inc_EFAC = true;
-    Nsamp = 20;
+    Nsamp = 5;
 
-    ar = load_data("/data/scattering/simulation_2100_2.ar", nchan, inc_τ, inc_α, inc_EFAC, Nsamp);
+    ar = load_data(ARGS[1], nchan, inc_τ, inc_α, inc_EFAC, Nsamp);
     parnames = ["beta", "phi0"]
     for i in 1:Nsamp-1 # First Shapelet component has a fixed amplitude of 1
        parnames = append!(parnames, ["samp$i"])
@@ -325,10 +349,11 @@ ar, paramnames = main()
 println(paramnames)
 
 ndim = length(paramnames)
+
 nDerived = 0
 s = settings.PolyChordSettings(ndim, nDerived)
-s.file_root = "chains"
-s.nlive = 200
+s.file_root = splitpath(ARGS[1])[end]*"-"*string(ar.nchan)*"chan-"*string(ar.Nsamp)*"shap"
+s.nlive = 300
 s.cluster_posteriors = false
 s.do_clustering = false
 s.write_dead = false
@@ -337,7 +362,9 @@ s.read_resume = false
 s.num_repeats = ndim * 3
 s.synchronous = false
 
-output = pypolychord.run_polychord(likelihood, ndim, nDerived, s, prior, dumper)
+make_param_file(s, paramnames)
+
+pypolychord.run_polychord(likelihood, ndim, nDerived, s, prior, dumper)
 
 
 # Benchmarking the code
